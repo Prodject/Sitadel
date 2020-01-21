@@ -9,7 +9,7 @@
 import argparse
 import logging
 import sys
-
+import signal
 from lib import __version__
 from lib.config import settings
 from lib.config.settings import Risk
@@ -100,10 +100,40 @@ class Sitadel(object):
         if args.risk is not None:
             settings.risk = Risk(args.risk)
 
+        # Setting up the logger
+        logger = logging.getLogger("sitadelLog")
+        logging.basicConfig(
+            filename="sitadel.log",
+            filemode="w",
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            datefmt="%d-%b-%y %H:%M:%S",
+            level=(logging.CRITICAL - (args.verbosity * 10)),
+        )
+
+        # Create handlers
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.WARNING)
+
+        file_handler = logging.FileHandler("sitadel.log")
+        file_handler.setLevel(level=(logging.CRITICAL - (args.verbosity * 10)))
+
+        # Create formatters and add it to handlers
+        console_format = logging.Formatter("%(name)s - %(levelname)s - %(message)s")
+        console_handler.setFormatter(console_format)
+
+        file_format = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+        file_handler.setFormatter(file_format)
+
+        # Add handlers to the logger
+        logger.addHandler(console_handler)
+        logger.addHandler(file_handler)
+
         # Register services
         Services.register("datastore", Datastore(settings.datastore))
-        Services.register("logger", logging.getLogger("sitadelLog"))
-        Services.register("output", Output(args.verbosity))
+        Services.register("logger", logger)
+        Services.register("output", Output())
         Services.register(
             "request_factory",
             SingleRequest(
@@ -117,23 +147,26 @@ class Sitadel(object):
 
         # Display target and scan starting time
         self.bn.preamble(self.url)
+        try:
+            # Run the fingerprint modules
+            self.ma.fingerprints(
+                args.fingerprint,
+                self.url,
+                args.cookie,
+            )
 
-        # Run the fingerprint modules
-        self.ma.fingerprints(
-            args.fingerprint,
-            args.user_agent,
-            args.proxy,
-            args.redirect,
-            args.timeout,
-            self.url,
-            args.cookie,
-        )
+            # Run the crawler to discover urls
+            discovered_urls = self.ma.crawler(self.url, args.user_agent)
 
-        # Run the crawler to discover urls
-        discovered_urls = self.ma.crawler(self.url, args.user_agent)
+            # Hotfix on KeyboardInterrupt being redirected to scrapy crawler process
+            signal.signal(signal.SIGINT, signal.default_int_handler)
 
-        # Run the attack modules on discovered urls
-        self.ma.attacks(args.attack, self.url, discovered_urls)
+            # Run the attack modules on discovered urls
+            self.ma.attacks(args.attack, self.url, discovered_urls)
+        except KeyboardInterrupt:
+            raise
+        finally:
+            self.bn.postscript()
 
 
 if __name__ == "__main__":

@@ -3,12 +3,16 @@ import subprocess
 from urllib.parse import urlparse
 
 from lib.utils.container import Services
+from lib.config.settings import Risk
 from .. import AttackPlugin
 
 
 class Crime(AttackPlugin):
+    level = Risk.DANGEROUS
+
     def process(self, start_url, crawled_urls):
         output = Services.get("output")
+        logger = Services.get("logger")
 
         output.info("Scanning crime (SPDY) vuln...")
         ip = ""
@@ -33,6 +37,7 @@ class Crime(AttackPlugin):
                     "That site is vulnerable to CRIME (SPDY), CVE-2012-4929."
                 )
         except Exception as e:
+            logger.error(e)
             output.error("Error occured\nAborting this attack...\n")
             output.debug("Traceback: %s" % e)
             return
